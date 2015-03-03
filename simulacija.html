@@ -1,0 +1,336 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.2/css/bootstrap.min.css">
+
+	<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.2/js/bootstrap.min.js"></script>
+	
+	<script type="text/javascript" src="https://www.google.com/jsapi"></script>
+	<script type="text/javascript">
+		google.load('visualization', '1.1', {packages: ['line']});
+//		google.setOnLoadCallback(drawChart);
+
+var data;
+var chart;
+var options;
+		function drawChart() {
+
+			  data = new google.visualization.DataTable();
+			  data.addColumn('number', 'Dan');
+			  data.addColumn('number', 'Zaraženih');
+			  data.addColumn('number', 'Imuni');
+			  data.addColumn('number', 'Mrtvi');
+
+			  chart = new google.charts.Line(document.getElementById('linechart_material'));
+
+
+			  options = {
+				chart: {
+				  title: 'Epidemija',
+				},
+				width: 900,
+				height: 500
+			  };
+
+		}
+
+	</script>
+</head>
+<body style="padding:20px;">
+<script>
+function R(){return (Math.random());}
+function P(v) {return (R()<=v)?true:false;}
+
+
+var NUM=16534;
+var NUM_HOMES=(NUM/3.5)|0;
+var NUM_ZARAZENIH=1;
+
+var dana_inkubacije=10;
+var vjerovatnoca_ozdravljenja=0.05; //u jednom danu
+var vjerovatnoca_imunosti=0.25; //nakon ozdravljenja
+var vjerovatnoca_smrti=0.01; //nakon prebolovane bolesti
+var vjerovatnoca_zaraze_pri_kontaktu=0.1;
+var vjerovatnoca_kontakta_sa_ukucanima=0.2;
+var broj_kontakata_u_prevozu=5;
+var vjerovatnoca_izlaska=[0.5,0.3,0.3,0.5,0.2]; //djeca, studenti, zaposleni, nezaposleni, penzioneri
+var broj_kontakata_pri_izlasku=[5,20,6,6,4]; //djeca, studenti, zaposleni, nezaposleni, penzioneri
+var broj_kontakata_na_radnom_mjestu=[20,20,10,3,3];
+
+var zarazenih=0;
+var dan=1;
+
+
+function Agent(){
+	this.stanje=0; //0, 1=zaražen, 2=bolestan, 3=imun, 4=preminuo
+	this.grupa=0;
+	this.home=0;
+	this.dan_zaraze=0;
+	this.razred_firma=0;
+
+	this.javni_prevoz=false;
+};
+var agenti=[];
+
+var homes=[];
+var razredi=[];
+var firme=[];
+var grupe=[0,0,0,0,0];
+
+var num_prevoz=0;var u_prevozu=[];
+
+function inicijalizacija(){
+	for(var i=0;i<NUM;i++) {
+		agenti[i]=new Agent();
+		//raspored u grupe
+		var r=R();
+		agenti[i].grupa=(r<=0.2?1:(r<=0.4?2:(r<=0.63?3:(r<=0.8?4:5))));
+		
+		grupe[agenti[i].grupa-1]++;
+		
+		//raspored u domacinstva
+		var home=(R()*NUM_HOMES)|0;
+		do{
+			if(undefined == homes[home]) homes[home]=[];
+			if(homes[home].length<7) {agenti[i].home=home;homes[home][homes[home].length]=(i);break;}
+			home=(home+1)%NUM_HOMES;
+		}while(agenti[i].home==0);
+
+		//da li koristi javni prevoz
+		r=R();
+		agenti[i].javni_prevoz=(agenti[i].grupa==1?P(0.1):agenti[i].grupa==2?P(0.5):agenti[i].grupa==3?P(0.5):false);
+		if(agenti[i].javni_prevoz) {u_prevozu[num_prevoz]=i;num_prevoz++;}
+
+	}
+	
+	//rasporeni u razrede/firme
+	for(var i=0;i<NUM;i++) {
+		if(agenti[i].grupa==3) {
+			agenti[i].razred_firma=(R()*(grupe[3-1]/50))|0; //zaposleni u firme po 50
+			if(undefined == firme[agenti[i].razred_firma]) firme[agenti[i].razred_firma]=[];
+			firme[agenti[i].razred_firma][firme[agenti[i].razred_firma].length]=(i);
+		}
+		if(agenti[i].grupa<3) {
+			agenti[i].razred_firma=(R()*(grupe[agenti[i].grupa-1]/30))|0; //učenici u razrede po 30
+			if(undefined == razredi[agenti[i].razred_firma]) razredi[agenti[i].razred_firma]=[];
+			razredi[agenti[i].razred_firma][razredi[agenti[i].razred_firma].length]=(i);
+		}
+	}
+
+	while(zarazenih<NUM_ZARAZENIH){
+		var i=(R()*NUM)|0;
+		if(agenti[i].stanje==0){
+			agenti[i].stanje=1;//seed infection
+			zarazenih++;
+		}
+	}
+
+	console.log("Grupe: "+grupe[0]+" "+grupe[1]+" "+grupe[2]+" "+grupe[3]+" "+grupe[4]);
+}
+
+function kontakt(agent1, agent2)
+{
+	if(P(vjerovatnoca_zaraze_pri_kontaktu) ) {
+		if((agenti[agent1].stanje==1||agenti[agent1].stanje==2) && agenti[agent2].stanje==0) {agenti[agent2].stanje=1;agenti[agent2].dan_zaraze=dan;zarazenih++;}
+		else 
+			if((agenti[agent2].stanje==1||agenti[agent2].stanje==2) && agenti[agent1].stanje==0) {agenti[agent1].stanje=1;agenti[agent1].dan_zaraze=dan;zarazenih++;}
+	}
+}
+
+
+function prevoz(){
+	for(var i=0;i<num_prevoz;i++) {
+		for(var f=0;f<broj_kontakata_u_prevozu;f++) kontakt(u_prevozu[i],u_prevozu[(R()*num_prevoz)|0]);
+	}
+}
+
+function radnomjesto(){
+	//ucenici i zaposleni kontaktiraju samo agente koji imaju istu grupu i razred
+	//nezaposleni i penzioneri kontaktiraju slučajne agente
+	for(var i=0;i<NUM;i++) {
+		if(agenti[i].stanje>1) continue; //ne ako je bolestan, imun ili umro
+		if(agenti[i].grupa<3) { //ucenik
+			var vjerovatnoca_kontakta=((broj_kontakata_na_radnom_mjestu[agenti[i].grupa-1])/razredi[agenti[i].razred_firma].length);
+			for(var i2=0;i2<razredi[agenti[i].razred_firma].length;++i2)
+				if(P(vjerovatnoca_kontakta)) 
+					kontakt(i,razredi[agenti[i].razred_firma][i2]);
+		}
+		else if(agenti[i].grupa==3) {//zaposleni
+			var vjerovatnoca_kontakta=((broj_kontakata_na_radnom_mjestu[agenti[i].grupa-1])/firme[agenti[i].razred_firma].length);
+			for(var i2=0;i2<firme[agenti[i].razred_firma].length;++i2)
+				if(P(vjerovatnoca_kontakta)) 
+					kontakt(i,firme[agenti[i].razred_firma][i2]);
+		}
+		else { //nazaposleni ili penzic
+			for(var k=0;k<broj_kontakata_na_radnom_mjestu[agenti[i].grupa-1];k++)
+				kontakt(i,(R()*NUM)|0);
+		}
+
+	}
+}
+
+function zabava(){	
+	var izisli=[];
+	for(var i=0;i<NUM;i++) {
+		if(agenti[i].stanje>1) continue; //ne ako je bolestan, imun ili umro
+		if(P(vjerovatnoca_izlaska[agenti[i].grupa-1])) izisli[izisli.length]=i;//izlazak?
+	}
+	for(var i=0;i<izisli.length;i++) {
+		for(var k=0;k<broj_kontakata_pri_izlasku[agenti[izisli[i]].grupa-1];k++){
+			var i2=(R()*izisli.length)|0;
+			kontakt(izisli[i],izisli[i2]);
+		}
+	}
+
+}
+
+function spavanje(){
+	for(var i=0;i<NUM;i++) {
+		for(var pos=0;pos<homes[agenti[i].home].length;++pos){
+			if((homes[agenti[i].home][pos])!=i) //ako nije isti agent
+				if(P(vjerovatnoca_kontakta_sa_ukucanima)) 
+					kontakt(i,homes[agenti[i].home][pos]);
+		}
+	}
+}
+
+function ozdravi(){
+	for(var i=0;i<NUM;i++) {
+		if(agenti[i].stanje==2){ //bolestan
+			if(P(vjerovatnoca_ozdravljenja)) {
+				if(P(vjerovatnoca_smrti)) {
+					agenti[i].stanje=4;//preminuo
+					zarazenih--;mrtvih++;
+				}
+				else if(P(vjerovatnoca_imunosti)) {
+					agenti[i].stanje=3;//imun
+					zarazenih--;imunih++;				
+				}
+				else {
+					agenti[i].stanje=0;//ozdravio
+					zarazenih--;
+				}
+			}
+		}
+		if(agenti[i].stanje==1){//inkubacija -> bolest
+			if(dan>agenti[i].dan_zaraze+dana_inkubacije) agenti[i].stanje=2;//bolest
+		}
+	}
+}
+
+var dat=[];
+var imunih=0,mrtvih=0;
+function main()
+{
+	agenti=[];
+	homes=[];
+	razredi=[];
+	firme=[];
+	grupe=[0,0,0,0,0];
+
+	num_prevoz=0;u_prevozu=[];
+	dan=1;zarazenih=0;imunih=0;mrtvih=0;dat=[];
+
+dana_inkubacije=parseFloat($("#inpInkubacija").val());
+vjerovatnoca_ozdravljenja=parseFloat($("#inp2").val()); //u jednom danu
+vjerovatnoca_zaraze_pri_kontaktu=parseFloat($("#inp3").val());
+vjerovatnoca_smrti=parseFloat($("#inp4").val());
+vjerovatnoca_imunosti=parseFloat($("#inp5").val());
+broj_kontakata_u_prevozu=parseFloat($("#inp8").val());
+broj_kontakata_na_radnom_mjestu=[parseFloat($("#inp61").val()),parseFloat($("#inp62").val()),parseFloat($("#inp63").val()),parseFloat($("#inp64").val()),parseFloat($("#inp65").val())];
+broj_kontakata_pri_izlasku=[parseFloat($("#inp71").val()),parseFloat($("#inp71").val()),parseFloat($("#inp71").val()),parseFloat($("#inp71").val()),parseFloat($("#inp71").val()),];
+vjerovatnoca_izlaska=[parseFloat($("#inp91").val()),parseFloat($("#inp92").val()),parseFloat($("#inp93").val()),parseFloat($("#inp94").val()),parseFloat($("#inp95").val()),];
+/*
+var vjerovatnoca_kontakta_sa_ukucanima=0.2;
+
+
+
+*/
+	
+	inicijalizacija();
+	$("#linechart_material").fadeOut(500);
+	$("#msg").fadeIn(500);
+	console.log("init");
+	window.setTimeout(dan1,1);
+}
+function dan1(){
+	{
+	console.log(dan);
+		$("#msg").html("Dan: "+dan+"<br/>Zaraženih: "+zarazenih);
+		if(dan%7<5){
+			prevoz();
+			radnomjesto();
+			prevoz();
+		}
+		else zabava();
+
+		
+		zabava();
+		spavanje();
+		
+		ozdravi();
+
+		dat[dan-1]=[dan,zarazenih,imunih,mrtvih];
+		
+		dan++;
+		if(zarazenih==0 || dan==500) {
+			$("#msg").fadeOut(500);
+	$("#linechart_material").fadeIn(500);
+			drawChart();
+			  data.addRows(dat);
+			  chart.draw(data, options);
+			$("#btn1").fadeIn();
+			console.log("Done in "+dan+" days. Total: "+NUM+", imune: "+imunih+" , dead: "+mrtvih+" .");
+		}
+		else window.setTimeout(dan1,1);
+	}
+
+}
+
+$(function(){
+	$("#inpInkubacija").val(dana_inkubacije);
+	$("#inp2").val(vjerovatnoca_ozdravljenja);
+	$("#inp3").val(vjerovatnoca_zaraze_pri_kontaktu);
+	$("#inp4").val(vjerovatnoca_smrti);
+	$("#inp5").val(vjerovatnoca_imunosti);
+	$("#inp61").val(broj_kontakata_na_radnom_mjestu[0]);	$("#inp62").val(broj_kontakata_na_radnom_mjestu[1]);	$("#inp63").val(broj_kontakata_na_radnom_mjestu[2]);	$("#inp64").val(broj_kontakata_na_radnom_mjestu[3]);	$("#inp65").val(broj_kontakata_na_radnom_mjestu[4]);	
+	$("#inp71").val(broj_kontakata_pri_izlasku[0]);	$("#inp72").val(broj_kontakata_pri_izlasku[1]);	$("#inp73").val(broj_kontakata_pri_izlasku[2]);	$("#inp74").val(broj_kontakata_pri_izlasku[3]);	$("#inp75").val(broj_kontakata_pri_izlasku[4]);	
+	$("#inp8").val(broj_kontakata_u_prevozu);
+	$("#inp91").val(vjerovatnoca_izlaska[0]);
+	$("#inp92").val(vjerovatnoca_izlaska[1]);
+	$("#inp93").val(vjerovatnoca_izlaska[2]);
+	$("#inp94").val(vjerovatnoca_izlaska[3]);
+	$("#inp95").val(vjerovatnoca_izlaska[4]);
+
+});
+</script>
+<style>
+form > div {height:3em;display:block;clear:both;}
+form label {width:200px;float:left;}
+form div p {display:inline-block !important;margin-left:20px;}
+form .form-control {display:inline-block !important;width:7em !important;}
+#msg {font-size:2em;line-height:2em;color: #777;}
+</style>
+<form >
+  <div>    <label>Inkubacija</label><input class="form-control" type="number" id="inpInkubacija"><p class="help-block">Inkubacija u danima. Agent je zarazan i aktivan.</p></div>
+  <div>    <label>Vjerovatnoća ozdravljenja</label><input class="form-control" type="number" id="inp2" min="0" max="1" step="0.1" ><p class="help-block">Za svaki dan u kojem je agent bolestan</p></div>
+  <div>    <label>Vjerovatnoća infekcije pri kontaktu sa zaraženim</label><input class="form-control" type="number" min="0" max="1" step="0.1" id="inp3"><p class="help-block"></p></div>
+  <div>    <label>Vjerovatnoća smrtnog ishoda</label><input class="form-control" type="number" min="0" max="1" step="0.1" id="inp4"><p class="help-block"></p></div>
+  <div>    <label>Vjerovatnoća imunosti</label><input class="form-control" type="number" min="0" max="1" step="0.1" id="inp5"><p class="help-block"></p></div>
+  <div>    <label>Broj kontakata na radnom mjestu/školi</label>	osnovci i djeca<input class="form-control" type="number" id="inp61">	srednjoš. i studenti<input class="form-control" type="number" id="inp62">	zaposleni<input class="form-control" type="number" id="inp63">	nezapos.<input class="form-control" type="number" id="inp64">	penzioneri<input class="form-control" type="number" id="inp65">	<p class="help-block"></p></div>
+  <div>    <label>Vjerovatnoća izlaska</label>	osnovci i djeca<input class="form-control" type="number" id="inp91">	srednjoš. i studenti<input class="form-control" type="number" id="inp92">	zaposleni<input class="form-control" type="number" id="inp93">	nezapos.<input class="form-control" type="number" id="inp94">	penzioneri<input class="form-control" type="number" id="inp95">	<p class="help-block"></p></div>  
+  <div>    <label>Broj kontakata pri izlasku</label>	osnovci i djeca<input class="form-control" type="number" id="inp71">	srednjoš. i studenti<input class="form-control" type="number" id="inp72">	zaposleni<input class="form-control" type="number" id="inp73">	nezapos.<input class="form-control" type="number" id="inp74">	penzioneri<input class="form-control" type="number" id="inp75">	<p class="help-block"></p></div>  
+  <div>    <label>Broj kontakata u javnom prevozu</label><input class="form-control" type="number" id="inp8"><p class="help-block"></p></div>
+  
+  <div><label></label>
+	<button id="btn1" onclick="$(this).hide();main();return false;">Simulacija!</button>
+</div>
+</form>
+<div id="msg" style="display:none;position:absolute;left:0;top:0;right:0;bottom:0;margin:auto;box-shadow:5px 5px 5px #666;width:30em;height:200px;border-radius:10px;border:solid #333 1px;background:white;text-align:center;padding-top:40px;">...</div>
+  <div id="linechart_material" style="margin:auto;width:900px;"></div>
+</body>
+</html>
